@@ -131,6 +131,76 @@ In the `handleProcesses(int*)` function, we first initialize some variables.
 
 Firstly is an array of 3 `ProcessInfo` structs. We initialize them with invalid structs which have their `success` field set to `false`.
 
+We also declare two `sigaction` structs for use with `handleSignals()` and `setChildrenSignalHandler()`.
+
+We call `handleSignals()` to initialize some signal handlers for intercepting Ctrl-C and Ctrl-Z.
+
+We then use `addProcessToArray()` to populate the `processes` array with new processes running the specified functions.
+
+Now that we have our processes, we can loop over all the samples.
+
+If sequential is on, we don't refresh the screen using `refreshScreen()`.
+
+Then we loop over all the processes in the `processes` array, making sure we skip over the invalid ones in case they weren't specified.
+
+We use `read()` to read from the current process's pipe, and once we have it, we print the string received, as well as the header if appropriate using `displayHeaderInfo()`.
+
+Afterwards, if appropriate, we also print the system information using `displaySystemInformation()`. It is important we print these parts when we receive the information, or else the timing will be mismatched and the output will be messed up.
+
+After we look at all samples, we wait for all children to finish using a while loop and `wait()`.
+
+Then, we close the parent's pipe read fds.
+
+###### addProcessToArray, main.c
+
+In the `addProcessToArray(ProcessInfo*, int, void (*)(int*, int[2]), int*, ProcessType, struct sigaction*)` function, we first create a new process and get the `ProcessInfo` struct using `initProcess()`.
+
+If this wasn't successful, we use `perror()` to show an error.
+
+If the struct returned is a child processes struct, that means the current code executed is from a child process, in which case we close it's write pipe, and exit out of the process.
+
+Otherwise, we are in the parent process, and we close the parent's write end of the pipe since we will not be using it.
+
+Finally, we set this struct returned to the parent in the processes array passed through as an argument.
+
+###### initProcess, main.c
+
+In the `initProcess(ProcessInfo*, void (*)(int*, int[2]), int*, ProcessType, struct sigaction*)` function, we first initialize pipes using `pipe()`. If this wasn't successful we use `perror()` to show an error and return an unsuccessful struct.
+
+Otherwise, we fork the process. If this is unsuccessful, we do the same as above, but first close the pipes that were opened.
+
+If it was successful, we check if it is the child process by comparing its pid to 0. If so, we close all previously opened pipes in this context since we don't need them for this process. We also close the read end of the pipe associated to it, and setup a child signal handler using `setChildrenSignalHandler()`.
+
+We then call the function associated to the function pointer in the arguments using `(*func)(flags, pipes)`. This is the function we want to associate with this process, and is useful since we don't want to repeat code for multiple functions.
+
+Once the child is done with its function, it returns a struct indicating that it is a child process that just returned.
+
+If it is not the child process, we return the struct for this process's information.
+
+###### setChildrenSignalHandler, main.c
+
+In the `setChildrenSignalHandler(struct sigaction*)` function, we simply set the signal handler for `sigint` through the sigaction struct parameter to `intHandlerChild` and call `sigaction()` with signal `SIGINT` on it to initialize it. We also print an error using `perror()` if something bad happened with `sigaction()`.
+
+This is so that children have a different signal handler than the parent, to make sure that our intercepts are only handled by the parent process.
+
+###### handleSignals, main.c
+
+In the `handleSignals(struct sigaction*, struct sigaction*)` function, we do the same thing as in `setChildrenSignalHandler()`, except for both `SIGINT` and `SIGTSTP`. The reason we don't set `SIGTSTP` in `setChildrenSignalHandler()` is that the functionality for the signal handler is the same for both children and parent processes for Ctrl-Z.
+
+We set the signal handlers for `SIGTSTP` and `SIGINT` to `tstpHandler()` and `intHandler()` respectively.
+
+###### intHandlerChild, main.c
+
+We do nothing in this function since it is just meant to intercept the signal.
+
+###### tstpHandler, main.c
+
+Same as `intHandlerChild()`
+
+###### intHandler, main.c
+
+In this function, we ask the user whether they want to exit. We then get their input using scanf to a char, and if they answered with 'y' or 'Y', then we exit the program.
+
 ###### handleReportUsers, stats_functions.c
 
 In the `handleReportUsers(int*, int[2])` function, we simply loop through all the samples, set the user usage string using `getUserUsage()`, write it to the pipe argument using `pipes[1]`, and sleep for the specified time delay.
@@ -163,6 +233,10 @@ We then close the file and return the count.
 ###### displaySystemInformation, main.c
 
 In the `displaySystemInformation()` function, we create a buffer struct where we use `uname()` to populate it with system information. If `uname()` returns -1, we have an error and we return out of the function. Otherwise, we can simply access the buffer and print out the system information.
+
+###### displayHeaderInfo, main.c
+
+In the `displayHeaderInfo(int, int, int)` function, we simply print out info including the current sample number, sample size, time delay, and current process usage using `getCurrentProcessUsage()`.
 
 ###### getMemoryUsage, stats_functions.c
 
