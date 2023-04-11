@@ -5,6 +5,8 @@
 #include <sys/types.h>
 #include <stdbool.h>
 #include <sys/wait.h>
+#include <sys/utsname.h>
+#include <signal.h>
 #include "process_info.h"
 #include "stats_functions.h"
 
@@ -13,10 +15,22 @@
 // argument handling
 int setFlags(int*, int, char**);
 
+// signals
+void handleSignals(struct sigaction*, struct sigaction*);
+void setChildrenSignalHandler(struct sigaction* sigint);
+void tstpHandler();
+void intHandler();
+
 // handling processes
 void handleProcesses(int*); 
-ProcessInfo initProcess(void (*func)(int*, int[2]), int* flags, int pipes[2], ProcessType);
-void addProcessToArray(ProcessInfo*, int, void (*func)(int*, int[2]), int* flags, int pipes[2], ProcessType);
+ProcessInfo initProcess(ProcessInfo*, void (*func)(int*, int[2]), int* flags, 
+                        int pipes[2], ProcessType, struct sigaction* sigint);
+void addProcessToArray(ProcessInfo*, int, void (*func)(int*, int[2]), 
+                       int* flags, int pipes[2], ProcessType, struct sigaction* sigint);
+
+// extra stuff in main
+void displayHeaderInfo(int samples, int sampleNumber, int timeDelay);
+void displaySystemInformation();
 
 // screen
 void refreshScreen();
@@ -46,7 +60,60 @@ int main(int argc, char *argv[]) {
 
 }
 
-ProcessInfo initProcess(void (*func)(int*, int[2]), int* flags, int pipes[2], ProcessType type) {
+void tstpHandler() {
+  // do nothing
+}
+
+void intHandler() {
+
+  printf("Would you like to exit? yes (y) / no (any key): ");
+
+  char answer;
+  scanf(" %c", &answer);
+
+  if (answer == 'y' || answer == 'Y') {
+    exit(0);
+  } 
+
+}
+
+void intHandlerChild() {
+  // do nothing
+}
+
+void handleSignals(struct sigaction* tstp, struct sigaction* sigint) {
+
+  tstp -> sa_handler = tstpHandler;
+  sigfillset(&(tstp -> sa_mask)); // block signals
+  tstp -> sa_flags = 0;
+  
+  if (sigaction(SIGTSTP, tstp, NULL) == -1) {
+    perror("SIGTSTP in handleSignals");
+  }
+
+  sigint -> sa_handler = intHandler;
+  sigfillset(&(sigint -> sa_mask));
+  sigint -> sa_flags = 0;
+
+  if (sigaction(SIGINT, sigint, NULL) == -1) {
+    perror("SIGINT in handleSignals");
+  }
+
+}
+
+void setChildrenSignalHandler(struct sigaction* sigint) {
+ 
+  sigint -> sa_handler = intHandlerChild; // set handler to default
+  sigemptyset(&(sigint -> sa_mask));
+
+  if (sigaction(SIGINT, sigint, NULL) == -1) {
+    perror("SIGINT in setChildrenSignalHandler");
+  }
+
+}
+
+ProcessInfo initProcess(ProcessInfo *processes, void (*func)(int*, int[2]), int* flags, 
+                        int pipes[2], ProcessType type, struct sigaction* sigint) {
   
   if (pipe(pipes) == -1) {
     
@@ -64,6 +131,9 @@ ProcessInfo initProcess(void (*func)(int*, int[2]), int* flags, int pipes[2], Pr
 
   if (pid == -1) {
 
+    close(pipes[0]);
+    close(pipes[1]);
+
     perror("Error forking in initProcess");
 
     ProcessInfo processInfo = {
@@ -76,6 +146,20 @@ ProcessInfo initProcess(void (*func)(int*, int[2]), int* flags, int pipes[2], Pr
 
   if (pid == 0) {
 
+    // close all previous pipes this one doesn't need
+    for (int i = 0; i < 3; i++) {
+
+      if (!processes[i].success) {
+        continue;
+      }
+
+      close(processes[i].pipeAccess[0]);
+      close(processes[i].pipeAccess[1]);
+
+    }
+
+    setChildrenSignalHandler(sigint); // set the signal handler for the children
+
     close(pipes[0]); // close read end for child, child doesn't need it
 
     // child
@@ -84,7 +168,9 @@ ProcessInfo initProcess(void (*func)(int*, int[2]), int* flags, int pipes[2], Pr
 
     ProcessInfo processInfo = {
       .success = true,
-      .isChild = true
+      .isChild = true,
+      .processType = type,
+      .pipeAccess = {pipes[0], pipes[1]}
     };
 
     return processInfo;
@@ -105,9 +191,10 @@ ProcessInfo initProcess(void (*func)(int*, int[2]), int* flags, int pipes[2], Pr
 
 }
 
-void addProcessToArray(ProcessInfo *processes, int index, void (*func)(int*, int[2]), int* flags, int pipes[2], ProcessType type) {
+void addProcessToArray(ProcessInfo *processes, int index, void (*func)(int*, int[2]), 
+                       int* flags, int pipes[2], ProcessType type, struct sigaction* sigint) {
 
-  ProcessInfo processInfo = initProcess(func, flags, pipes, type);
+  ProcessInfo processInfo = initProcess(processes, func, flags, pipes, type, sigint);
 
   if (!processInfo.success) {
     perror("Error making new user process in initProcess");
@@ -115,7 +202,6 @@ void addProcessToArray(ProcessInfo *processes, int index, void (*func)(int*, int
   }
 
   if (processInfo.isChild) {
-    printf("I finished, type: %d\n", type);
     close(processInfo.pipeAccess[1]);
     exit(0);
     return;
@@ -131,7 +217,6 @@ void handleProcesses(int* flags) {
 
   int user = flags[0];
   int system = flags[1];
-  int graphics = flags[2];
   int sequential = flags[3];
   int samples = flags[4];
   int tdelay = flags[5];
@@ -148,15 +233,19 @@ void handleProcesses(int* flags) {
   ProcessType userType = 1;
   ProcessType cpuType = 2;
 
+  struct sigaction tstp;
+  struct sigaction sigint;
+
+  handleSignals(&tstp, &sigint);
 
   // init processes for memory, user, and cpu. using for loop to mitigate how often we repeat the code 
   if (user == 1) {
-    addProcessToArray(processes, 1, handleReportUsers, flags, pipes[1], userType);
+    addProcessToArray(processes, 1, handleReportUsers, flags, pipes[1], userType, &sigint);
   }
 
   if (system == 1) {
-    addProcessToArray(processes, 0, handleReportMemory, flags, pipes[0], memoryType);
-    addProcessToArray(processes, 2, handleReportCPU, flags, pipes[2], cpuType);
+    addProcessToArray(processes, 0, handleReportMemory, flags, pipes[0], memoryType, &sigint);
+    addProcessToArray(processes, 2, handleReportCPU, flags, pipes[2], cpuType, &sigint);
   }
 
   for (int i = 0; i < samples; i++) {
@@ -164,6 +253,8 @@ void handleProcesses(int* flags) {
     if (sequential == 0) {
       refreshScreen();
     }
+
+    bool printedHeader = false;
 
     for (int j = 0; j < 3; j++) {
 
@@ -177,12 +268,30 @@ void handleProcesses(int* flags) {
       char buffer[MAX_STRING_LEN];
 
       if (read(processes[j].pipeAccess[0], buffer, MAX_STRING_LEN) > 0) {
+
+        // we do this so that formatting is correct
+        if (!printedHeader) {
+          displayHeaderInfo(samples, i + 1, tdelay);
+          printedHeader = true;
+        }
+
         printf("%s", buffer);
+
+        // append system info after cpu info 
+        if (processes[j].processType == cpuType) {
+          displaySystemInformation();
+        }
+
       }
 
     } 
 
   }
+
+  int status = 0;
+
+  // wait for children to finish
+  while (wait(&status) > 0); 
 
   // close all pipe read fds
   for (int i = 0; i < 3; i++) {
@@ -195,10 +304,40 @@ void handleProcesses(int* flags) {
 
   }
 
-  int status = 0;
+}
 
-  // wait for children to finish
-  while (wait(&status) > 0); 
+void displaySystemInformation() {
+
+  printf("----------System-Information----------\n");
+
+  // create the buffer
+  struct utsname systemInfo;
+
+  if (uname(&systemInfo) == -1) {
+    printf("Error Fetching System Information... uname\n");
+    return;
+  }
+
+  // multiple print statements for clarity
+  printf("System Name: %s\n", systemInfo.sysname);
+  printf("Machine Name: %s\n", systemInfo.nodename);
+  printf("OS Release: %s\n", systemInfo.release);
+  printf("OS Version: %s\n", systemInfo.version);
+  printf("Architecture: %s\n", systemInfo.machine);
+
+
+  printf("--------------------------------------\n");
+
+}
+
+void displayHeaderInfo(int samples, int sampleNumber, int timeDelay) {
+
+  printf("\n+-------------------------------------+\n\n");
+
+  printf("%d samples every %d second(s)\n", samples, timeDelay);
+  printf("Sample #%d\n\n", sampleNumber);
+
+  printf("Memory Usage: %d kB\n\n", getCurrentProcessUsage());
 
 }
 

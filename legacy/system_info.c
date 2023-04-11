@@ -9,27 +9,10 @@
 
 // constants to make argument handling more organized
 
-const char *HELP_COMMANDS[] = {
-  "--help (show this help page)",
-  "--user (default argument, report users connected and sessions)",
-  "--system (default argument, report system usage)",
-  "--graphics (include graphical output where possible)",
-  "--sequential (information output sequentially, no refreshing of screen)",
-  "--samples=N (take N samples over the specified time)",
-  "--tdelay=T (take N samples previously over T time in seconds)"
-};
-
-const char *ERROR_MESSAGES[] = {
-  "Invalid command line arguments. Use '%s --help' to see a list of commands.\n",
-  "Invalid command line arguments. Your flag '--samples=N' is invalid. N must be a positive integer. Use '%s --help' to see a list of commands.\n",
-  "Invalid command line arguments. Your flag '--tdelay=T' is invalid. T must be a positive integer. Use '%s --help' to see a list of commands.\n",
-};
 
 const int STAT_COLUMNS = 7;
 const int IDLE_COLUMN = 4;
 
-const double RAM_GRAPHICS_SCALE = 0.1;
-const double CPU_GRAPHICS_SCALE = 2.0;
 
 // functionality
 void displayUserUsage();
@@ -42,10 +25,6 @@ int getCurrentProcessUsage();
 void composeStats(int*);
 void refreshScreen();
 void displayHeaderInfo(int, int, int);
-
-// argument handling
-int setFlags(int*, int, char**);
-void printHelpPage(char*);
 
 
 int main(int argc, char *argv[]) {
@@ -63,13 +42,7 @@ int main(int argc, char *argv[]) {
     return 0;
   }
 
-  // debugging
-  //printf("Flags: \n");
-  //for (int i = 0; i < 6; i++) {
-  //  printf("%d\n", flags[i]);
-  //}
-  
-  composeStats(flags);
+    composeStats(flags);
 
   return 0;
 }
@@ -137,191 +110,8 @@ void displaySystemInformation() {
 
 }
 
-void displayMemoryUsage(int graphics, int sampleSize, int sampleCount, char history[sampleSize][256], double historyRam[sampleSize]) {
 
-  printf("----------Memory-Usage----------------\n");
 
-  // create the buffer
-  struct sysinfo memory;
-
-  if (sysinfo(&memory) == -1) {
-    printf("Error Fetching Memory Usage... sysinfo\n");
-    return;
-  }
-
-  // get and process the values from sysinfo into formats we like.
-
-  double toGB = 1000000000.0;
-
-  double totalRam = ((double) memory.totalram) / toGB;
-  double totalVirtualRam = totalRam + ((double) memory.totalswap) / toGB;
-  
-  double usedRam = totalRam - ((double) memory.freeram) / toGB; 
-  double usedVirtualRam = totalVirtualRam - ((double) (memory.freeram + memory.freeswap)) / toGB;
-
-  snprintf(history[sampleCount - 1], sizeof(history[sampleCount - 1]), "Physical: %.2f GB / %.2f GB       Virtual: %.2f GB / %.2f GB       ", usedRam, totalRam, usedVirtualRam, totalVirtualRam);
-
-  if (graphics == 1) {
-
-    int maxGraphicsLength = (int) (totalRam / RAM_GRAPHICS_SCALE) + 5;
-
-    char graphicsLine[maxGraphicsLength];
-    historyRam[sampleCount - 1] = usedRam;
-
-    // initialize the string
-    strcpy(graphicsLine, "|");
-
-    // check if first entry
-    if (sampleCount == 1) {
-      strcat(graphicsLine, "*");
-    } else {
-
-      double lastEntry = historyRam[sampleCount - 2];
-      double ramDelta = usedRam - lastEntry;
-
-      double deltaAbsolute = fabs(ramDelta);
-
-      for (double i = 0.0; i < deltaAbsolute; i += RAM_GRAPHICS_SCALE) {
-
-        // concatenate characters based on increase/decrease
-        if (ramDelta < 0) {
-          strcat(graphicsLine, ":");
-        } else {
-          strcat(graphicsLine, "#");
-        }
-
-      }
-
-      if(ramDelta < 0) {
-        strcat(graphicsLine, "@");
-      } else {
-        strcat(graphicsLine, "*");
-      }
-
-      char delta[10];
-      
-      snprintf(delta, sizeof(delta), " %.2f", ramDelta);
-
-      strncat(graphicsLine, delta, sizeof(graphicsLine));
-
-    }
-
-    strcat(history[sampleCount - 1], graphicsLine);
-  }
-
-  for (int i = 0; i < sampleCount; i++) {
-    printf("%s\n", history[i]);
-  }
-
-  printf("--------------------------------------\n");
-
-}
-
-void displayCPUUsage(int graphics, int* lastTotalTime, int* lastIdleTime, int sampleSize, int sampleCount, char history[sampleSize][256]) {
-
-  printf("----------CPU-Usage-------------------\n");
-
-  // get_nprocs() is from sys/sysinfo.h
-
-  printf("CPU Cores: %d\n", get_nprocs());
- 
-  int totalTime;
-  int idleTime;
-
-  getCPUTimes(&totalTime, &idleTime);
-
-  int totalTimeDelta = totalTime - *lastTotalTime;
-  int idleTimeDelta = idleTime - *lastIdleTime;
-
-  double usagePercent = getUsagePercent(totalTimeDelta, idleTimeDelta);
-
-  *lastTotalTime = totalTime;
-  *lastIdleTime = idleTime;
-
-  printf("CPU Usage: %.2f%%\n", usagePercent);
-
-  if (graphics == 1) {
-
-    int maxGraphicsLength = (int) (100 / CPU_GRAPHICS_SCALE) + 5;
-
-    char graphicsLine[maxGraphicsLength];
-
-    // initialize string
-    strcpy(graphicsLine, "|");
-
-    for (double i = 0.0; i < usagePercent; i += CPU_GRAPHICS_SCALE) {
-      // for every unit of scale, concatenate a | character
-      strcat(graphicsLine, "|");
-    }
-
-    char usageString[10];
-
-    snprintf(usageString, sizeof(usageString), " %.2f%%", usagePercent);
-
-    strncat(graphicsLine, usageString, sizeof(graphicsLine));
-
-    strncpy(history[sampleCount - 1], graphicsLine, sizeof(history[sampleCount - 1]));
-
-    for (int i = 0; i < sampleCount; i++) {
-      printf("%s\n", history[i]);
-    }
-
-  }
- 
-  printf("--------------------------------------\n");
-
-}
-
-void getCPUTimes(int *totalTime, int *idleTime) {
- 
-  FILE *stat = fopen("/proc/stat", "r");
-
-  if (stat == NULL) {
-    printf("Error Fetching CPU Usage... /proc/stat cannot be opened\n");
-    return;
-  }
-
-  int currentTotalTime = 0;
-  int currentIdleTime = 0;
-
-  char cpu[10];
-
-  fscanf(stat, "%s", cpu);
-
-  // make sure file is formatted how we want
-
-  if (strcmp(cpu, "cpu") != 0) {
-    printf("Error Fetching CPU Usage... /proc/stat formatted incorrectly\n");
-    return;
-  }
-
-  for (int i = 0; i < STAT_COLUMNS; i++) {
-
-    int time;
-
-    // proceed to get the next 7 columns
-    fscanf(stat, "%d", &time);
-
-    currentTotalTime += time;
-
-    if (i == IDLE_COLUMN - 1) {
-      // idle is the 4th column
-      currentIdleTime = time;
-    }
-
-  }
-
-  *totalTime = currentTotalTime;
-  *idleTime = currentIdleTime;
-
-  fclose(stat);
-
-}
-
-double getUsagePercent(int totalTime, int idleTime) {
-  // turn the total time and idle time into a usage percent
-  return (1.0 - ((double) idleTime) / ((double) totalTime)) * 100.0; 
-}
 
 int getCurrentProcessUsage() {
 
@@ -368,10 +158,7 @@ void composeStats(int *flags) {
   int timeDelay = flags[5];
 
   double cpuSleepTime = 500000;
-  int totalTime;
-  int idleTime;
-
-
+  
   // grab a baseline sample so that we can take delta of cpu times to
   // make it more accurate to realtime usage
   if (system == 1) {
@@ -385,7 +172,6 @@ void composeStats(int *flags) {
   char memoryStringHistory[samples][256];
   double memoryUsageHistory[samples];
 
-  char cpuStringHistory[samples][256];
 
   for (int i = 1; i < samples + 1; i++) {
 
@@ -415,12 +201,6 @@ void composeStats(int *flags) {
   // properly end utent
   endutent();
 
-}
-
-void refreshScreen() {
-  // print escape codes
-  printf("\033[0;0H"); //cursor to 0
-  printf("\033[2J"); // refresh screen
 }
 
 // functions below here are for argument handling

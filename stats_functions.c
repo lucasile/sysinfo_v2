@@ -70,11 +70,11 @@ void handleReportCPU(int *flags, int pipes[2]) {
   int totalTime;
   int idleTime;
 
+  char cpuStringHistory[samples - 1][256];
+
   for (int i = 0; i < samples; i++) {
 
     char string[MAX_STRING_LEN] = "";
-
-    char cpuStringHistory[samples][256];
 
     if (i == 0) {
       // grab baseline
@@ -97,6 +97,28 @@ void handleReportCPU(int *flags, int pipes[2]) {
 
     sleep(tdelay);
   }
+
+}
+
+int getCurrentProcessUsage() {
+
+  FILE *status = fopen("/proc/self/status", "r");
+
+  char key[30] = "";
+  int currentValue;
+
+  // fscanf through the file until key is VmRSS, meaning we can then get
+  // the value for the utilization of this program
+  while (strcmp(key, "VmRSS:") != 0) {
+    if (fscanf(status, "%s %d", key, &currentValue) == EOF) {
+      fclose(status);
+      return -1;
+    }
+  }
+
+  fclose(status);
+
+  return currentValue;
 
 }
 
@@ -242,7 +264,6 @@ void getCPUUsage(char string[MAX_STRING_LEN], int graphics, int* lastTotalTime, 
 
   int totalTimeDelta = totalTime - *lastTotalTime;
   int idleTimeDelta = idleTime - *lastIdleTime;
-
   double usagePercent = getUsagePercent(totalTimeDelta, idleTimeDelta);
 
   *lastTotalTime = totalTime;
@@ -250,7 +271,7 @@ void getCPUUsage(char string[MAX_STRING_LEN], int graphics, int* lastTotalTime, 
 
   char cpuUsageString[256];
   snprintf(cpuUsageString, sizeof(cpuUsageString), "CPU Usage: %.2f%%\n", usagePercent);
-  strncat(string, cpuUsageString, (MAX_STRING_LEN - strlen(string - 1)) * sizeof(char));
+  strncat(string, cpuUsageString, (MAX_STRING_LEN - strlen(string) - 1) * sizeof(char));
 
   if (graphics == 1) {
 
@@ -259,11 +280,11 @@ void getCPUUsage(char string[MAX_STRING_LEN], int graphics, int* lastTotalTime, 
     char graphicsLine[maxGraphicsLength];
 
     // initialize string
-    strcpy(graphicsLine, "|");
+    strncpy(graphicsLine, "|", maxGraphicsLength * sizeof(char));
 
     for (double i = 0.0; i < usagePercent; i += CPU_GRAPHICS_SCALE) {
       // for every unit of scale, concatenate a | character
-      strcat(graphicsLine, "|");
+      strncat(graphicsLine, "|", (maxGraphicsLength - strlen(graphicsLine) - 1) * sizeof(char));
     }
 
     char usageString[10];
@@ -272,9 +293,9 @@ void getCPUUsage(char string[MAX_STRING_LEN], int graphics, int* lastTotalTime, 
 
     strncat(graphicsLine, usageString, (maxGraphicsLength - strlen(graphicsLine) - 1) * sizeof(char));
 
-    strncpy(history[sampleCount - 1], graphicsLine, sizeof(history[sampleCount - 1]));
+    strncpy(history[sampleCount - 2], graphicsLine, sizeof(history[sampleCount - 2]));
 
-    for (int i = 1; i < sampleCount; i++) {
+    for (int i = 0; i < sampleCount - 1; i++) {
       strncat(string, history[i], (MAX_STRING_LEN - strlen(string) - 2) * sizeof(char));
       strncat(string, "\n", (MAX_STRING_LEN - strlen(string) - 1) * sizeof(char));
     }
