@@ -135,7 +135,7 @@ We also declare two `sigaction` structs for use with `handleSignals()` and `setC
 
 We call `handleSignals()` to initialize some signal handlers for intercepting Ctrl-C and Ctrl-Z.
 
-We then use `addProcessToArray()` to populate the `processes` array with new processes running the specified functions.
+We then use `addProcessToArray()` to populate the `processes` array with new processes running the specified functions (handleReportMemory, handleReportUsers, handleReportCPU).
 
 Now that we have our processes, we can loop over all the samples.
 
