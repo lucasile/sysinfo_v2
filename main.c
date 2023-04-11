@@ -24,9 +24,9 @@ void intHandler();
 // handling processes
 void handleProcesses(int*); 
 ProcessInfo initProcess(ProcessInfo*, void (*func)(int*, int[2]), int* flags, 
-                        int pipes[2], ProcessType, struct sigaction* sigint);
+                        ProcessType, struct sigaction* sigint);
 void addProcessToArray(ProcessInfo*, int, void (*func)(int*, int[2]), 
-                       int* flags, int pipes[2], ProcessType, struct sigaction* sigint);
+                       int* flags, ProcessType, struct sigaction* sigint);
 
 // extra stuff in main
 void displayHeaderInfo(int samples, int sampleNumber, int timeDelay);
@@ -113,8 +113,10 @@ void setChildrenSignalHandler(struct sigaction* sigint) {
 }
 
 ProcessInfo initProcess(ProcessInfo *processes, void (*func)(int*, int[2]), int* flags, 
-                        int pipes[2], ProcessType type, struct sigaction* sigint) {
+                        ProcessType type, struct sigaction* sigint) {
   
+  int pipes[2];
+
   if (pipe(pipes) == -1) {
     
     perror("Error creating pipe in initProcess");
@@ -192,9 +194,9 @@ ProcessInfo initProcess(ProcessInfo *processes, void (*func)(int*, int[2]), int*
 }
 
 void addProcessToArray(ProcessInfo *processes, int index, void (*func)(int*, int[2]), 
-                       int* flags, int pipes[2], ProcessType type, struct sigaction* sigint) {
+                       int* flags, ProcessType type, struct sigaction* sigint) {
 
-  ProcessInfo processInfo = initProcess(processes, func, flags, pipes, type, sigint);
+  ProcessInfo processInfo = initProcess(processes, func, flags, type, sigint);
 
   if (!processInfo.success) {
     perror("Error making new user process in initProcess");
@@ -227,7 +229,6 @@ void handleProcesses(int* flags) {
   };
 
   ProcessInfo processes[3] = {invalid, invalid, invalid};
-  int pipes[3][2];
 
   ProcessType memoryType = 0;
   ProcessType userType = 1;
@@ -240,12 +241,12 @@ void handleProcesses(int* flags) {
 
   // init processes for memory, user, and cpu. using for loop to mitigate how often we repeat the code 
   if (user == 1) {
-    addProcessToArray(processes, 1, handleReportUsers, flags, pipes[1], userType, &sigint);
+    addProcessToArray(processes, 1, handleReportUsers, flags, userType, &sigint);
   }
 
   if (system == 1) {
-    addProcessToArray(processes, 0, handleReportMemory, flags, pipes[0], memoryType, &sigint);
-    addProcessToArray(processes, 2, handleReportCPU, flags, pipes[2], cpuType, &sigint);
+    addProcessToArray(processes, 0, handleReportMemory, flags, memoryType, &sigint);
+    addProcessToArray(processes, 2, handleReportCPU, flags, cpuType, &sigint);
   }
 
   for (int i = 0; i < samples; i++) {
