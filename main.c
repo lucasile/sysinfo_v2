@@ -103,7 +103,7 @@ void handleSignals(struct sigaction* tstp, struct sigaction* sigint) {
 
 void setChildrenSignalHandler(struct sigaction* sigint) {
  
-  sigint -> sa_handler = intHandlerChild; // set handler to default
+  sigint -> sa_handler = intHandlerChild; // set handler to the new child handler
   sigemptyset(&(sigint -> sa_mask));
 
   if (sigaction(SIGINT, sigint, NULL) == -1) {
