@@ -145,6 +145,8 @@ Then we loop over all the processes in the `processes` array, making sure we ski
 
 We use `read()` to read from the current process's pipe, and once we have it, we print the string received, as well as the header if appropriate using `displayHeaderInfo()`.
 
+We loop over the processes in order, and read from them in order, to ensure the same order printed each time.
+
 Afterwards, if appropriate, we also print the system information using `displaySystemInformation()`. It is important we print these parts when we receive the information, or else the timing will be mismatched and the output will be messed up.
 
 After we look at all samples, we wait for all children to finish using a while loop and `wait()`.
